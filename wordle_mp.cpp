@@ -14,7 +14,9 @@ int main(int argc, char** argv) {
     // run word search space algorithm until certain convergence
     while (words.size() > 1){
         // initially filled with words from words unordered set
-        std::queue<std::string> tasks();
+        // somehow update to NOT include words that have been removed 
+        // (or just simply remove these words from vector, could be expensive) 
+        std::queue<std::string> tasks(words.begin(), words.end());
 
         // curr_max used for early stopping
         double curr_max = 0;
