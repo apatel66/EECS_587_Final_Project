@@ -34,6 +34,7 @@ int main(int argc, char** argv) {
     int searchSpaceSize = 0;
     int maxRemoved = 0;
     string maxRemovedWord = "";
+    string answer = "";
 
     int length = 0;
     string answer = "";
@@ -67,6 +68,7 @@ int main(int argc, char** argv) {
         words[nextWord] = {false, 0, 0};
         searchSpace.insert(nextWord);
         ++searchSpaceSize;
+        answer = nextWord; //Change from last word in the list to a random one
     }
     wordFile.close();
 
@@ -111,18 +113,50 @@ int main(int argc, char** argv) {
                 int numWordsRemoved = 0;
                 // Decode response. ResponseNum --> Response
 
+                // 0 -> B, 1 -> Y, 2 -> G
+                int combo[length];
+                int responseNumCopy = responseNum;
+                for (int i = len-1; i >= 0; —i) {
+                    combo[i] = responseNumCopy / pow(3, i);
+                    responseNumCopy %= pow(3, i);
+                }
+
                 //Go through each word in the searchSpace
                 for (const auto &word : searchSpace) {
                     bool valid = true;
 
-                    int combo[length];
-                    int responseNumCopy = responseNum;
-                    for (int i = len-1; i >= 0; —i) {
-                        combo[i] = responseNumCopy / pow(3, i);
-                        responseNumCopy %= pow(3, i);
-                    }
-
                     // TODO: Check if a word is meets the response
+                    vector <bool> matched(length, false);
+                    for (int i = 0; i < currWord.length(); ++i) {
+                        int index = -1;
+                        for (int j = 0; j < word.length(); ++j) {
+                            if (currWord[i] == word[j] && !matched[i]) {
+                                index = j;
+                                break;
+                            }
+                        }
+
+                        if (combo[i] == 0) {
+                            if (index != -1) {
+                                valid  = false;
+                                break;
+                            }
+                        }
+                        else if (combo[i] == 1) {
+                            if (index == i) {
+                                valid  = false;
+                                break;
+                            }
+                            mathced[i] = true;
+                        }
+                        else {
+                            if (index != i) {
+                                valid = false;
+                                break;
+                            }
+                            matched[i] = true;
+                        }
+                    }
 
                     if (!valid) {
                         ++numWordsRemoved;
@@ -154,9 +188,73 @@ int main(int argc, char** argv) {
 
     }
 
-    // TODO: make guess
-    // TODO: capture response
+    // TODO: make guess + capture response
+    string guess = maxRemovedWord;
+    int comboResponse[length];
+    vector<bool> matched(length, 0); //Keeps track of matched letter in the answer
+    for (int i = 0; i < guess.length(); ++i) {
+        int index = -1;
+        for (int j = 0; j < answer.length; ++j) {
+            if (guess[i] == answer[j] && !matched[j]) {
+                index = i;
+                break;
+            }
+        }
+
+        if (index == -1) {
+            comboResponse[i] = 0;
+        }
+        else if (index != i) {
+            comboResponse[i] = 1;
+            matched[i] = true;
+        }
+        else {
+            comboResponse[i] == 2;
+            matched[i] = true;
+        }
+    }
     // TODO: update search space
+    //Go through each word in the searchSpace
+    for (const auto &word : searchSpace) {
+        bool valid = true;
+
+        // TODO: Check if a word is meets the response
+        vector <bool> matched(length, false);
+        for (int i = 0; i < currWord.length(); ++i) {
+            int index = -1;
+            for (int j = 0; j < word.length(); ++j) {
+                if (currWord[i] == word[j] && !matched[i]) {
+                    index = j;
+                    break;
+                }
+            }
+
+            if (combo[i] == 0) {
+                if (index != -1) {
+                    valid  = false;
+                    break;
+                }
+            }
+            else if (combo[i] == 1) {
+                if (index == i) {
+                    valid  = false;
+                    break;
+                }
+                mathced[i] = true;
+            }
+            else {
+                if (index != i) {
+                    valid = false;
+                    break;
+                }
+                matched[i] = true;
+            }
+        }
+
+        if (!valid) {
+            searchSpace.erase(word);
+        }
+    }
 
 
 
