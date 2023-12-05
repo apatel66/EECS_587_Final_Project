@@ -210,7 +210,7 @@ int main(int argc, char** argv) {
     const char* char_array = maxRemovedWord.c_str();
 
     if (maxRemoved == globalMaxRemoved) {
-        MPI_Bcast(const_cast<char*>(char_array), maxRemovedWord.size() + 1, MPI_CHAR, 0, MPI_COMM_WORLD);
+        MPI_Bcast(const_cast<char*>(char_array), maxRemovedWord.size() + 1, MPI_CHAR, id, MPI_COMM_WORLD);
     }
 
     string guess(char_array);
