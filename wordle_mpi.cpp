@@ -45,10 +45,9 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &id);
 
     int searchSpaceSize = 0;
-    string answer;
-    int length;
-    int maxResponseNum;
-    int listSize;
+    string answer = "";
+    int length = 0;
+    int listSize = 0;
     unordered_set<string> searchSpace;
     unordered_map<string, WordInfo> words;
     vector<Task> tasks;
@@ -85,15 +84,15 @@ int main(int argc, char** argv) {
         }
     }
     wordFile.close();
-    if (id == 0) {
-        cout << "Answer: " << answer << endl << endl;
-    }
+    // if (id == 0) {
+    //     cout << "Answer: " << answer << endl << endl;
+    // }
+    cout << "Answer: " << answer << endl << endl;
     
-    MPI_Barrier(MPI_COMM_WORLD);
-
     // queue for enumerating all possible response tasks
     queue<Task> create_tasks;
     vector<Task> final_tasks;
+    int maxResponseNum = pow(3, length);
 
     int maxRemoved = 0;
     string maxRemovedWord = "";
@@ -111,6 +110,8 @@ int main(int argc, char** argv) {
     int start_index = id * portion_size + (id < remainder ? id : remainder);
     int end_index = start_index + portion_size + (id < remainder);
 
+    // create tasks based off of processor id
+
     for (int i = start_index; i < end_index; ++i) {
         Task currTask = tasks[i];
         string currWord = currTask.currWord;
@@ -123,6 +124,8 @@ int main(int argc, char** argv) {
             create_tasks.push({responseNum*3 + 2, responseLength+1, currWord});
         }
     }
+
+    // continue making tasks until responseLength == length
 
     while (!create_tasks.empty()) {
         Task currTask = create_tasks.front();
@@ -178,17 +181,17 @@ int main(int argc, char** argv) {
                 }
                 if (combo[i] == 0) {
                     if (index != -1) {
-                        valid  = false;
+                        valid = false;
                         break;
                     }
                 }
 
                 else if (combo[i] == 1) {
-                    if (index == i) {
-                        valid  = false;
+                    if (index == i || index == -1) {
+                        valid = false;
                         break;
                     }
-                    matched[i] = true;
+                    matched[index] = true;
                 }
 
                 else {
@@ -196,10 +199,12 @@ int main(int argc, char** argv) {
                         valid = false;
                         break;
                     }
-                    matched[i] = true;
+                    matched[index] = true;
                 }
             }
-            if (!valid) ++numWordsRemoved;
+            if (!valid) {
+                ++numWordsRemoved;
+            }
         }
 
         words[currWord].searchSpaceRemoved += numWordsRemoved;
@@ -212,23 +217,24 @@ int main(int argc, char** argv) {
 
     cout << "Guess: " << maxRemovedWord << " max removed = " << maxRemoved << " pid = " << id << endl;
 
-    int globalMaxRemoved;
-    MPI_Allreduce(&maxRemoved, &globalMaxRemoved, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    // int globalMaxRemoved;
+    // MPI_Allreduce(&maxRemoved, &globalMaxRemoved, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
-    if (maxRemoved == globalMaxRemoved) {
-        MPI_Bcast(const_cast<char*>(maxRemovedWord.c_str()), maxRemovedWord.size() + 1, MPI_CHAR, id, MPI_COMM_WORLD);
-    } else {
-        MPI_Bcast(nullptr, 0, MPI_CHAR, MPI_ROOT, MPI_COMM_WORLD);
-        char* receivedWordBuffer = new char[maxRemovedWord.size() + 1];
-        MPI_Bcast(receivedWordBuffer, maxRemovedWord.size() + 1, MPI_CHAR, MPI_ROOT, MPI_COMM_WORLD);
-        std::string receivedWord(receivedWordBuffer);
-        delete[] receivedWordBuffer;
-        maxRemovedWord = receivedWord;
-    }
+    // int maxCountProcessor;
+    // int globalMaxProcessorId;
 
-    // string guess(char_array);
+    // if (maxRemoved == globalMaxRemoved) {
+    //     maxCountProcessor = id;
+    // } else {
+    //     maxCountProcessor = -1;
+    // }
+    
+    // MPI_Allreduce(&maxCountProcessor, &globalMaxProcessorId, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    // cout << globalMaxProcessorId << endl;
 
-    cout << maxRemovedWord << endl;
+    // MPI_Bcast(&maxCountProcessor, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // cout << maxRemovedWord << endl;
 
     // int comboResponse[length];
     // vector<bool> matched(length, false);
