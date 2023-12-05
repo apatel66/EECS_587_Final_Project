@@ -1,5 +1,6 @@
 import random
 import sys
+import os
 
 word_list = []
 rand_words = []
@@ -20,7 +21,11 @@ for i in range(4, 10):
 
     rand_words = random.sample(word_list, MAX_WORDS)
 
-    output_filename = "words_final/" + str(i) + "_letter_words.txt"
+    path_name = "words_final_" + str(MAX_WORDS) + "/"
+    if not os.path.isdir(path_name):
+        os.mkdir(path_name, 0o777)
+
+    output_filename = path_name + str(i) + "_letter_words.txt"
     with open(output_filename, "w") as out_file:
         for word in rand_words:
             out_file.write(word.upper() + "\n")
