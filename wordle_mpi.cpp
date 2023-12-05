@@ -1,5 +1,6 @@
 #include <bits/stdc++.h>
 #include <mpi.h>
+#include <ctime>
 #include <cmath>
 #include <iostream>
 #include <fstream>
@@ -16,13 +17,13 @@ using std::string;
 using std::ifstream;
 using std::queue;
 using std::cout;
-using std::endl:
+using std::endl;
 using std::stoi;
 using std::vector;
 
 struct Task {
     int response;
-    int responseLength:
+    int responseLength;
     string currWord;
 };
 
@@ -47,38 +48,60 @@ int main(int argc, char** argv) {
     string answer;
     int length;
     int maxResponseNum;
+    int listSize;
     unordered_set<string> searchSpace;
     unordered_map<string, WordInfo> words;
     vector<Task> tasks;
 
     // Input validation
-    if (argc < 2 || argc > 3) {
-        cout << "Usage: ./wordle_mpi <num_letters> <secret_word (optional)>" << endl;
+    if (argc < 3 || argc > 4) {
+        cout << "Usage: ./wordle_mp <list_size> <num_letters> <secret_word (optional)>" << endl;
         return -1;
     }
-    length = stoi(argv[1]);
-    if (argc == 3) {
-        answer = argv[2];
+    listSize = stoi(argv[1]);
+    length = stoi(argv[2]);
+    if (argc == 4) {
+        answer = argv[3];
     }
     if (length < 4 || length > 9 || answer.length() != length) {
-        "argument num_letters must be between [4, 9] and argument 'answer' must be num_letters long" << endl;
+        cout << "argument num_letters must be between [4, 9] and argument 'answer' must be num_letters long" << endl;
         return -1;
     }
 
     //Read in from file
     ifstream wordFile;
-    wordFile.open("words_final/" + to_string(length) + "_letter_words.txt");
+    wordFile.open("words_final_" + std::to_string(listSize) + "/" + std::to_string(length) + "_letter_words.txt");
     string nextWord = "";
+    srand(time(0)); 
+    int randWord = (rand() % listSize) + 1;
+    int inc = 0;
     while (!wordFile.eof()) {
         wordFile >> nextWord;
-        words[nextWord] = {false, 0, 0};
         searchSpace.insert(nextWord);
         ++searchSpaceSize;
-        answer = nextWord; //Change from last word in the list to a random one
+        ++inc;
+        if (answer == "" && inc == randWord) {
+            answer = nextWord; //Change from last word in the list to a random one
+        }
     }
     wordFile.close();
+    if (id == 0) {
+        cout << "Answer: " << answer << endl << endl;
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // queue for enumerating all possible response tasks
+    queue<Task> create_tasks;
+    vector<Task> final_tasks;
+
+    int maxRemoved = 0;
+    string maxRemovedWord = "";
 
     for (const auto &word : searchSpace) {
+        maxRemoved = 0;
+        maxRemovedWord = "";
+        words[word] = {0, 0};
         tasks.push_back({0, 0, word});
     }
 
@@ -87,11 +110,6 @@ int main(int argc, char** argv) {
 
     int start_index = id * portion_size + (id < remainder ? id : remainder);
     int end_index = start_index + portion_size + (id < remainder);
-
-    // queue for enumerating all possible response tasks
-    queue<Task> create_tasks;
-
-    vector<Task> final_tasks;
 
     for (int i = start_index; i < end_index; ++i) {
         Task currTask = tasks[i];
@@ -107,8 +125,10 @@ int main(int argc, char** argv) {
     }
 
     while (!create_tasks.empty()) {
-        Task currTask = create_tasks.front()
+        Task currTask = create_tasks.front();
         string currWord = currTask.currWord;
+
+        create_tasks.pop();
 
         int responseNum = currTask.response;
         int responseLength = currTask.responseLength;
@@ -121,20 +141,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    portion_size = final_tasks.size() / num_proc;
-    remainder = final_tasks.size() % num_proc;
-
-    start_index = id * portion_size + (id < remainder ? id : remainder);
-    end_index = start_index + portion_size + (id < remainder);
-
-    // local max removed + local best word
-    int maxRemoved = 0;
-    string maxRemovedWord = "";
-
-    for (int i = start_index; i < end_index; ++i) {
-        Task currTask = tasks[i];
+    for (int i = 0; i < final_tasks.size(); ++i) {
+        Task currTask = final_tasks[i];
         string currWord = currTask.currWord;
-        currWordInfo = words[currWord];
+        WordInfo currWordInfo = words[currWord];
 
         int numResponsesLeft = maxResponseNum - currWordInfo.numResponsesTested;
         int theoreticalMax = currWordInfo.searchSpaceRemoved + numResponsesLeft * searchSpaceSize;
@@ -149,9 +159,9 @@ int main(int argc, char** argv) {
         int numWordsRemoved = 0;
         int combo[length];
         int responseNumCopy = responseNum;
-        for (int i = len-1; i >= 0; —i) {
+        for (int i = length-1; i >= 0; --i) {
             combo[i] = responseNumCopy / pow(3, i);
-            responseNumCopy %= pow(3, i);
+            responseNumCopy %= (int) pow(3, i);
         }
 
         for (const auto &word : searchSpace) {
@@ -159,43 +169,38 @@ int main(int argc, char** argv) {
             vector<bool> matched(length, false);
 
             for (int i = 0; i < currWord.length(); ++i) {
-                if (currWord[i] == word[j] && !matched[i]) {
-                    index = j;
-                    break;
+                int index = -1;
+                for (int j = 0; j < word.length(); ++j) {
+                    if (currWord[i] == word[j] && !matched[j]) {
+                        index = j;
+                        break;
+                    }
                 }
-            }
+                if (combo[i] == 0) {
+                    if (index != -1) {
+                        valid  = false;
+                        break;
+                    }
+                }
 
-            // if curr tile is black and its in the word
-            // then not valid
-            if (combo[i] == 0) {
-                if (index != -1) {
-                    valid  = false;
-                    break;
+                else if (combo[i] == 1) {
+                    if (index == i) {
+                        valid  = false;
+                        break;
+                    }
+                    matched[i] = true;
                 }
-            }
 
-            // if curr tile is yellow and its in the word
-            // if index is currently at where its yellow = not valid
-            else if (combo[i] == 1) {
-                if (index == i) {
-                    valid  = false;
-                    break;
+                else {
+                    if (index != i) {
+                        valid = false;
+                        break;
+                    }
+                    matched[i] = true;
                 }
-                matched[i] = true;
             }
-
-            // if green and not in correct position
-            // not valid
-            else {
-                if (index != i) {
-                    valid = false;
-                    break;
-                }
-                matched[i] = true;
-            }
+            if (!valid) ++numWordsRemoved;
         }
-
-        if (!valid) ++numWordsRemoved;
 
         words[currWord].searchSpaceRemoved += numWordsRemoved;
         words[currWord].numResponsesTested += 1;
@@ -205,78 +210,107 @@ int main(int argc, char** argv) {
         }
     }
 
+    cout << "Guess: " << maxRemovedWord << " max removed = " << maxRemoved << " pid = " << id << endl;
+
     int globalMaxRemoved;
     MPI_Allreduce(&maxRemoved, &globalMaxRemoved, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-    const char* char_array = maxRemovedWord.c_str();
 
     if (maxRemoved == globalMaxRemoved) {
-        MPI_Bcast(const_cast<char*>(char_array), maxRemovedWord.size() + 1, MPI_CHAR, id, MPI_COMM_WORLD);
+        MPI_Bcast(const_cast<char*>(maxRemovedWord.c_str()), maxRemovedWord.size() + 1, MPI_CHAR, id, MPI_COMM_WORLD);
+    } else {
+        MPI_Bcast(nullptr, 0, MPI_CHAR, MPI_ROOT, MPI_COMM_WORLD);
+        char* receivedWordBuffer = new char[maxRemovedWord.size() + 1];
+        MPI_Bcast(receivedWordBuffer, maxRemovedWord.size() + 1, MPI_CHAR, MPI_ROOT, MPI_COMM_WORLD);
+        std::string receivedWord(receivedWordBuffer);
+        delete[] receivedWordBuffer;
+        maxRemovedWord = receivedWord;
     }
 
-    string guess(char_array);
-    int comboResponse[length];
-    vector<bool> matched(length, 0);
-    for (int i = 0; i < guess.length(); ++i) {
-        int index = -1;
-        for (int j = 0; j < answer.length; ++j) {
-            if (guess[i] == answer[j] && !matched[j]) {
-                index = i;
-                break;
-            }
-        }
+    // string guess(char_array);
 
-        if (index == -1) {
-            comboResponse[i] = 0;
-        }
-        else if (index != i) {
-            comboResponse[i] = 1;
-            matched[i] = true;
-        }
-        else {
-            comboResponse[i] == 2;
-            matched[i] = true;
-        }
-    }
+    cout << maxRemovedWord << endl;
 
-    for (const auto &word : searchSpace) {
-        bool valid = true;
+    // int comboResponse[length];
+    // vector<bool> matched(length, false);
+    // for (int i = 0; i < guess.length(); ++i) {
+    //     int index = -1;
+    //     for (int j = 0; j < answer.length(); ++j) {
+    //         if (guess[i] == answer[j] && !matched[j]) {
+    //             index = i;
+    //             break;
+    //         }
+    //     }
 
-        vector <bool> matched(length, false);
-        for (int i = 0; i < currWord.length(); ++i) {
-            int index = -1;
-            for (int j = 0; j < word.length(); ++j) {
-                if (currWord[i] == word[j] && !matched[i]) {
-                    index = j;
-                    break;
-                }
-            }
+    //     if (index == -1) {
+    //         comboResponse[i] = 0;
+    //     }
+    //     else if (index != i) {
+    //         comboResponse[i] = 1;
+    //         matched[i] = true;
+    //     }
+    //     else {
+    //         comboResponse[i] == 2;
+    //         matched[i] = true;
+    //     }
+    // }
 
-            if (combo[i] == 0) {
-                if (index != -1) {
-                    valid  = false;
-                    break;
-                }
-            }
-            else if (combo[i] == 1) {
-                if (index == i) {
-                    valid  = false;
-                    break;
-                }
-                matched[i] = true;
-            }
-            else {
-                if (index != i) {
-                    valid = false;
-                    break;
-                }
-                matched[i] = true;
-            }
-        }
+    // if (id == 0) {
+    //     cout << "Guess: " << guess << "   Response: ";
+    //     for (int i = 0; i < length; ++i) {
+    //         if (comboResponse[i] == 0) {
+    //             cout << "B";
+    //         }
+    //         else if (comboResponse[i] == 1) {
+    //             cout << "Y";
+    //         }
+    //         else {
+    //             cout << "G";
+    //         }
+    //     }
+    //     cout << endl;
+    // }
 
-        if (!valid) {
-            searchSpace.erase(word);
-        }
-    }
+    // MPI_Barrier(MPI_COMM_WORLD);
+
+    // for (const auto &word : searchSpace) {
+    //     bool valid = true;
+
+    //     vector <bool> matched(length, false);
+    //     for (int i = 0; i < guess.length(); ++i) {
+    //         int index = -1;
+    //         for (int j = 0; j < word.length(); ++j) {
+    //             if (guess[i] == word[j] && !matched[i]) {
+    //                 index = j;
+    //                 break;
+    //             }
+    //         }
+
+    //         if (comboResponse[i] == 0) {
+    //             if (index != -1) {
+    //                 valid  = false;
+    //                 break;
+    //             }
+    //         }
+    //         else if (comboResponse[i] == 1) {
+    //             if (index == i) {
+    //                 valid  = false;
+    //                 break;
+    //             }
+    //             matched[i] = true;
+    //         }
+    //         else {
+    //             if (index != i) {
+    //                 valid = false;
+    //                 break;
+    //             }
+    //             matched[i] = true;
+    //         }
+    //     }
+
+    //     if (!valid) {
+    //         searchSpace.erase(word);
+    //     }
+    // }
 
     //Finalize MPI
     MPI_Finalize();
