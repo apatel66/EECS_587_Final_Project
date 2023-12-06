@@ -98,6 +98,7 @@ int main(int argc, char** argv) {
         }
 
         //Add all words to the queue
+        words.clear();
         for (string word: searchSpace) {
             maxRemoved = 0;
             maxRemovedWord = "ZZZZZ";

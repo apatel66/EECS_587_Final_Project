@@ -100,7 +100,13 @@ int main(int argc, char** argv) {
         cout << "Answer: " << answer << endl << endl;
     }
 
+    int numIterations = 0;
     while (!answerFound) {
+        ++numIterations;
+        if (numIterations >= 7) {
+            break;
+        }
+    
         int portion_size = searchSpace.size() / NUM_PROC;
         int remainder = searchSpace.size() % NUM_PROC;
         
@@ -112,6 +118,7 @@ int main(int argc, char** argv) {
         maxRemovedWord = "ZZZZZ";
 
         // Create an empty map of words
+        words.clear();
         for (int i = start_index; i < end_index; ++i) {
             words[searchSpace[i]] = {0, 0};
         }
@@ -338,7 +345,7 @@ int main(int argc, char** argv) {
         }
         searchSpace = newSearchSpace;
         if (ID == 0){
-            cout << "Guess: " << guess << endl;
+            cout << "Guess #" << numIterations << ": " << guess << endl;
             cout << "Response: ";
             for (int i = 0; i < length; ++i) {
                 if (comboResponse[i] == 0) {
