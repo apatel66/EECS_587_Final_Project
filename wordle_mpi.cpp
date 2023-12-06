@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    int maxResponseNum = 0;
+    int maxResponseNum = pow(3, length);
     unordered_set<string> searchSpace;
     unordered_map<string, WordInfo> words;
     vector<Task> tasks;
