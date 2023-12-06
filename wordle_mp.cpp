@@ -226,7 +226,8 @@ int main(int argc, char** argv) {
                         words[currWord].searchSpaceRemoved += numWordsRemoved;
                         words[currWord].numResponsesTested += 1;
 
-                        // Update the optimal word if there's a new max
+                        // Update the optimal word if there's a new max.
+                        // If tie, choose the one that comes first alphabetically
                         if (words[currWord].searchSpaceRemoved > maxRemoved ||
                             (words[currWord].searchSpaceRemoved == maxRemoved && currWord.compare(maxRemovedWord) < 0)) {
                             maxRemoved = words[currWord].searchSpaceRemoved;

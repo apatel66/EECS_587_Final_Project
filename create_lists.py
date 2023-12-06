@@ -20,6 +20,7 @@ for i in range(4, 10):
                 word_list.append(word)
 
     rand_words = random.sample(word_list, MAX_WORDS)
+    rand_words.sort()
 
     path_name = "words_final_" + str(MAX_WORDS) + "/"
     if not os.path.isdir(path_name):

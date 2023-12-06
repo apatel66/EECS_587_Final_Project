@@ -44,6 +44,15 @@ int main(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &NUM_PROC);
     MPI_Comm_rank(MPI_COMM_WORLD, &ID);
 
+    //Timer
+    MPI_Barrier(MPI_COMM_WORLD);
+    double startTime, endTime;
+    double startPartTime, endPartTime, totalTime;
+    if (ID == 0) {
+        startTime = MPI_Wtime();
+    }
+
+    double maxCorrectness = 1.0;
     int searchSpaceSize = 0;
     int maxRemoved = 0;
     string maxRemovedWord = "ZZZZZ";
@@ -66,15 +75,6 @@ int main(int argc, char** argv) {
         cout << "argument num_letters must be between [4, 9] and argument 'answer' must be num_letters long" << endl;
         return -1;
     }
-
-
-    // 1. All processes read in from the file
-    // 2. Each process calculates its partition
-    // 3. Each process finds its local max
-    // 4. All_reduce to find max removed
-    // 5. The process with the word should print it out and send to others
-    // 6. Every process will update its search space
-    // 7. Repeat until no work is left
 
     vector<string> searchSpace;
     unordered_map<string, WordInfo> words;
@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
         cout << "Answer: " << answer << endl << endl;
     }
 
-    //while (answerFound) {
+    while (!answerFound) {
         int portion_size = searchSpace.size() / NUM_PROC;
         int remainder = searchSpace.size() % NUM_PROC;
         
@@ -109,11 +109,16 @@ int main(int argc, char** argv) {
         int numWords = end_index - start_index + 1;
 
         maxRemoved = 0;
-        maxRemovedWord = "ZZZZ";
+        maxRemovedWord = "ZZZZZ";
 
         // Create an empty map of words
         for (int i = start_index; i < end_index; ++i) {
             words[searchSpace[i]] = {0, 0};
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (ID == 0) {
+            startPartTime = MPI_Wtime();
         }
 
         // Go through all words in the parition
@@ -122,6 +127,14 @@ int main(int argc, char** argv) {
             for (int j = 0; j < searchSpace.size(); ++j) {
                 string testWord = searchSpace[j];
                 int numRemoved = 0;
+
+                //Test Theoretical Max
+                int numResponsesLeft = searchSpace.size() - j + 1;
+                int theoreticalMax = words[currWord].searchSpaceRemoved + (numResponsesLeft * searchSpace.size() * maxCorrectness);
+                if (theoreticalMax < maxRemoved) {
+                    //cout << "STOPPED Checking: " << currWord << " at " << j << "/" << searchSpace.size() << endl;
+                    break;
+                }
 
                 //Get the response for the currWord (answer) + testWord (guess) combo
                 int combo[length];
@@ -202,11 +215,11 @@ int main(int argc, char** argv) {
                 maxRemovedWord = currWord;
             }
         }
-
         //We have our local max now
 
         //Communicate to find the global best word 
-        cout << "Guess: " << maxRemovedWord << " max removed = " << maxRemoved << " pid = " << ID << endl;
+        MPI_Barrier(MPI_COMM_WORLD);
+        //cout << "Guess: " << maxRemovedWord << " max removed = " << maxRemoved << " pid = " << ID << endl;
         int globalMaxRemoved;
         MPI_Allreduce(&maxRemoved, &globalMaxRemoved, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
@@ -215,9 +228,9 @@ int main(int argc, char** argv) {
         if (maxRemoved == globalMaxRemoved) {
             maxCountProcessor = ID;
         } else {
-            maxCountProcessor = -1;
+            maxCountProcessor = 999999;
         }
-        MPI_Allreduce(&maxCountProcessor, &globalMaxProcessorId, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        MPI_Allreduce(&maxCountProcessor, &globalMaxProcessorId, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
 
         char guess_buffer[length];
         if (ID == globalMaxProcessorId) {
@@ -226,7 +239,12 @@ int main(int argc, char** argv) {
         MPI_Bcast(guess_buffer, length + 1, MPI_CHAR, globalMaxProcessorId, MPI_COMM_WORLD);
         string guess(guess_buffer);
 
-        cout << "best word = " << guess << endl;
+        //cout << "best word = " << guess << endl;
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (ID == 0) {
+            endPartTime = MPI_Wtime();
+            totalTime += (endPartTime - startPartTime);
+        }
 
         //Check the guess and get the response
         int comboResponse[length];
@@ -253,22 +271,6 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (ID == 0) {
-            cout << "Guess: " << guess << "   Response: ";
-            for (int i = 0; i < length; ++i) {
-                if (comboResponse[i] == 0) {
-                    cout << "B";
-                }
-                else if (comboResponse[i] == 1) {
-                    cout << "Y";
-                }
-                else {
-                    cout << "G";
-                }
-            }
-            cout << endl;
-        }
-    
         // Check if it's the answer
         bool isAnswer = true;
         for (int i = 0; i < length; ++i) {
@@ -336,6 +338,7 @@ int main(int argc, char** argv) {
         }
         searchSpace = newSearchSpace;
         if (ID == 0){
+            cout << "Guess: " << guess << endl;
             cout << "Response: ";
             for (int i = 0; i < length; ++i) {
                 if (comboResponse[i] == 0) {
@@ -350,9 +353,20 @@ int main(int argc, char** argv) {
             }
             cout << endl;
             cout << "Num Words Removed: " << toRemove.size() << endl << endl;
+            /*cout << "New search space: " << searchSpace.size() << endl;
+            for(string word : searchSpace) {
+                cout << word << endl;
+            }*/
         }
 
-    //}
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (ID == 0) {
+        endTime = MPI_Wtime();
+        cout << "Parallel work took " << totalTime << " seconds" << endl;
+        cout << "Entire Program took " << endTime-startTime << " seconds" << endl;
+    }
 
     //Finalize MPI
     MPI_Finalize();
