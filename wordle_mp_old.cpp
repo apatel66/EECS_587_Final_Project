@@ -23,8 +23,8 @@ using std::endl;
 using std::stoi;
 
 struct Task {
-    int testWordIndex;
-    int testWordLayer;
+    int response;
+    int responseLength;
     string currWord;
 };
 
@@ -38,7 +38,6 @@ int main(int argc, char** argv) {
     double end; 
     start = omp_get_wtime(); 
 
-    double maxCorrectness = 1.0;
     int maxRemoved = 0;
     string maxRemovedWord = "";
     string answer = "";
@@ -63,7 +62,8 @@ int main(int argc, char** argv) {
     }
 
     // Create map of the entire search space
-    vector<string> searchSpace;
+    int maxResponseNum = pow(3, length);
+    unordered_set<string> searchSpace;
     unordered_map<string, WordInfo> words;
     queue<Task> tasks;
 
@@ -76,40 +76,34 @@ int main(int argc, char** argv) {
     int inc = 0;
     while (!wordFile.eof()) {
         wordFile >> nextWord;
-        searchSpace.push_back(nextWord);
+        searchSpace.insert(nextWord);
         ++inc;
         if (answer == "" && inc == randWord) {
             answer = nextWord; //Change from last word in the list to a random one
         }
     }
-    searchSpace.pop_back();
     wordFile.close();
     cout << "Answer: " << answer << endl << endl;
 
     int numIterations = 0;
+    int testSum = 0;
 
-
-    while (!answerFound) {
+    //while (!answerFound) {
         ++numIterations;
-        if (numIterations >= 7) {
+        /*if (numIterations >= 10) {
             break;
-        }
+        }*/
 
         //Add all words to the queue
-        for (string word: searchSpace) {
+        for (const auto &word : searchSpace) {
             maxRemoved = 0;
-            maxRemovedWord = "ZZZZZ";
+            maxRemovedWord = "";
             words[word] = {0, 0};
             tasks.push({0, 0, word});
         }
 
-        int maxLayer  = (int)log2(searchSpace.size());
-        double logNormal = log2(searchSpace.size());
-        if (logNormal - maxLayer > 0.0000001) {
-            ++maxLayer;
-        }
+        //unordered_set<string> stopChecking;
 
-        unordered_set<string> stopChecking;
         while (!tasks.empty()) {
             int numTasks = tasks.size();
 
@@ -117,74 +111,42 @@ int main(int argc, char** argv) {
             for (int i = 0; i < numTasks; ++i) {
                 Task currTask;
                 string currWord;
-                bool stop;
                 #pragma omp critical
                 {
+                    //cout << "During: " << omp_get_num_threads() << endl;
                     currTask = tasks.front();
                     tasks.pop();
                     currWord = currTask.currWord;
-                    stop = (stopChecking.find(currWord) != stopChecking.end());
-                }
-                if (stop) {
-                    continue;
-                }
-                
-                // Calculate thoretical max and compare to global max
-                #pragma omp critical
-                {
-                    WordInfo currWordInfo = words[currWord];
-                    int numResponsesLeft = searchSpace.size() - currWordInfo.numResponsesTested;
-                    int theoreticalMax = currWordInfo.searchSpaceRemoved + (numResponsesLeft * searchSpace.size() * maxCorrectness);
-                    
-                    if (theoreticalMax < maxRemoved) {
-                        //cout << "STOPPED Checking: " << currWord << " at " << currWordInfo.numResponsesTested << "/" << searchSpace.size() << endl;
-                        stopChecking.insert(currWord);
-                        stop = true;
-                    }
-                }
 
+                    //If we need to stop checking it, then skip
+                    //stop = stopChecking.find(currWord) != stopChecking.end();
+                }
 
                 // Do the calculation
-                string testWord = searchSpace[currTask.testWordIndex];
-                int testWordLayer = currTask.testWordLayer;
-                if (testWordLayer == maxLayer && currTask.testWordIndex < searchSpace.size()) {
+                int responseNum = currTask.response;
+                int responseLength = currTask.responseLength;
+                if (responseLength == length) {
                     int numWordsRemoved = 0;
 
-                    //Get the response for the currWord (answer) + testWord (guess) combo
+                    // Decode response. ResponseNum --> Response
+                    // 0 -> B, 1 -> Y, 2 -> G
                     int combo[length];
-                    vector<bool> matched(length, false); //Keeps track of matched letter in the answer
-                    for (int i = 0; i < testWord.length(); ++i) {
-                        int index = -1;
-                        for (int j = 0; j < currWord.length(); ++j) {
-                            if (testWord[i] == currWord[j] && !matched[j]) {
-                                index = j;
-                                break;
-                            }
-                        }
-
-                        if (index == -1) {
-                            combo[i] = 0;
-                        }
-                        else if (index != i) {
-                            combo[i] = 1;
-                            matched[index] = true;
-                        }
-                        else {
-                            combo[i] = 2;
-                            matched[index] = true;
-                        }
+                    int responseNumCopy = responseNum;
+                    for (int i = length-1; i >= 0; --i) {
+                        combo[i] = responseNumCopy / pow(3, i);
+                        responseNumCopy %= (int) pow(3, i);
                     }
 
-                    //Go through each word in the search space and count how many would be invalid had we guessed the testWord
+                    //Go through each word in the searchSpace
                     for (const auto &word : searchSpace) {
                         bool valid = true;
 
                         // Check if a word meets the response
                         vector <bool> matched(length, false);
-                        for (int i = 0; i < testWord.length(); ++i) {
+                        for (int i = 0; i < currWord.length(); ++i) {
                             int index = -1;
                             for (int j = 0; j < word.length(); ++j) {
-                                if (testWord[i] == word[j] && !matched[j]) {
+                                if (currWord[i] == word[j] && !matched[j]) {
                                     index = j;
                                     break;
                                 }
@@ -213,6 +175,14 @@ int main(int argc, char** argv) {
                         }
 
                         if (!valid) {
+                            /*#pragma omp critical
+                            {
+                                cout << currWord << " " << word << " ";
+                                for (int i = 0; i < length; ++i) {
+                                    cout << combo[i];
+                                }
+                                cout << endl;
+                            }*/
                             ++numWordsRemoved;
                         }
                     }
@@ -220,12 +190,22 @@ int main(int argc, char** argv) {
                     // Update the number of words removed
                     #pragma omp critical
                     {
+                        cout << currWord << ": " << numWordsRemoved << " ";
+                        for (int j = 0; j < length; ++j) {
+                            cout << combo[j];
+                        }
+                        cout << endl;
                         words[currWord].searchSpaceRemoved += numWordsRemoved;
                         words[currWord].numResponsesTested += 1;
+
+                        if (currWord == "LAVES") {
+                            testSum += numWordsRemoved;
+                        }
 
                         // Update the optimal word if there's a new max
                         if (words[currWord].searchSpaceRemoved > maxRemoved ||
                             (words[currWord].searchSpaceRemoved == maxRemoved && currWord.compare(maxRemovedWord) < 0)) {
+                            //cout << "New Max: " << currWord << "   " << words[currWord].searchSpaceRemoved << endl;
                             maxRemoved = words[currWord].searchSpaceRemoved;
                             maxRemovedWord = currWord;
                         }
@@ -236,15 +216,24 @@ int main(int argc, char** argv) {
                 // Add to task queue
                 #pragma omp critical
                 {
-                    if (testWordLayer < maxLayer) {
-                        tasks.push({(currTask.testWordIndex * 2) + 0, testWordLayer+1, currWord});
-                        tasks.push({(currTask.testWordIndex * 2) + 1, testWordLayer+1, currWord});
+                    if (responseLength < length) {
+                        tasks.push({responseNum*3 + 0, responseLength+1, currWord});
+                        tasks.push({responseNum*3 + 1, responseLength+1, currWord});
+                        tasks.push({responseNum*3 + 2, responseLength+1, currWord});
                     }
                 }
                 
             }
 
         }
+
+        cout << "TEST LAVES: " << testSum << endl;
+        for (const auto &word : searchSpace) {
+            cout << word <<": " << words[word].searchSpaceRemoved << endl;
+        }
+        //cout << "NAMER: " << words["NAMER"].searchSpaceRemoved << endl;
+        //cout << "GRACE: " << words["GRACE"].searchSpaceRemoved << endl;
+        //cout << "ABHOR: " << words["ABHOR"].searchSpaceRemoved << endl;
 
         // Make guess + capture response
         string guess = maxRemovedWord;
@@ -258,19 +247,36 @@ int main(int argc, char** argv) {
                     break;
                 }
             }
+            //cout << guess[i] << " " << "Position in Guess: " << i << " " << "Position in answer: " << index << endl;
 
             if (index == -1) {
+                //cout << "Black" << endl;
                 comboResponse[i] = 0;
             }
             else if (index != i) {
+                //cout << "Yellow" << endl;
                 comboResponse[i] = 1;
                 matched[index] = true;
             }
             else {
+                //cout << "Green" << endl;
                 comboResponse[i] = 2;
                 matched[index] = true;
             }
         }
+        cout << "Guess: " << guess << "   Response: ";
+        for (int i = 0; i < length; ++i) {
+            if (comboResponse[i] == 0) {
+                cout << "B";
+            }
+            else if (comboResponse[i] == 1) {
+                cout << "Y";
+            }
+            else {
+                cout << "G";
+            }
+        }
+        cout << endl;
 
         // Check if it's the answer
         bool isAnswer = true;
@@ -287,7 +293,7 @@ int main(int argc, char** argv) {
         // Update search space
         //Go through each word in the searchSpace
         int numRemoved = 0;
-        unordered_set <string> toRemove;
+        vector <string> toRemove;
         for (const auto &word : searchSpace) {
             bool valid = true;
             
@@ -323,40 +329,51 @@ int main(int argc, char** argv) {
                     matched[index] = true;
                 }
             }
+            //cout << "Word: " << word << "  Valid: " << valid << endl;
 
             if (!valid) {
-                toRemove.insert(word);
+                toRemove.push_back(word);
             }
         }
-        toRemove.insert(guess);
+        toRemove.push_back(guess);
 
         //Remove words that don't work
-        vector<string> newSearchSpace;
-        for (string word : searchSpace) {
-            if (toRemove.find(word) == toRemove.end()) {
-                newSearchSpace.push_back(word);
+        for (string word : toRemove) {
+            if (searchSpace.find(word) != searchSpace.end()) {
+                //cout << word << endl;
+                searchSpace.erase(word);
+                ++numRemoved;  
             }
         }
-        searchSpace = newSearchSpace;
-        cout << "Guess #" << numIterations << ": " << guess << endl;
-        cout << "Response: ";
-        for (int i = 0; i < length; ++i) {
-            if (comboResponse[i] == 0) {
-                cout << "B";
-            }
-            else if (comboResponse[i] == 1) {
-                cout << "Y";
-            }
-            else {
-                cout << "G";
-            }
-        }
-        cout << endl;
-        cout << "Num Words Removed: " << toRemove.size() << endl << endl;
-    }
+
+        cout << "Optimal Word: " << guess << " Num Words Removed: " << numRemoved << endl << endl;
+    //}
+
 
     end = omp_get_wtime(); 
     printf("Work took %f seconds\n", end - start);
 
     return 0;
 }
+
+
+                /*if (stop) {
+                    continue;
+                }
+                // Calculate thoretical max and compare to global max
+                WordInfo currWordInfo;
+                #pragma omp critical
+                {
+                    currWordInfo = words[currWord];
+                    int numResponsesLeft = maxResponseNum - currWordInfo.numResponsesTested;
+                    int theoreticalMax = currWordInfo.searchSpaceRemoved + (numResponsesLeft * searchSpaceSize);
+                    
+                    if (theoreticalMax < maxRemoved) {
+                        cout << "STOPPED Checking: " << currWord << " at " << currWordInfo.numResponsesTested << "/" << maxResponseNum << endl;
+                        stopChecking.insert(currWord);
+                        stop = true;
+                    }
+                }
+                if (stop) {
+                    continue;
+                }*/
