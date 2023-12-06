@@ -28,7 +28,6 @@ struct Task {
 };
 
 struct WordInfo {
-    bool inSearchSpace;
     int searchSpaceRemoved;
     int numResponsesTested;
 };
@@ -45,12 +44,11 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &id);
 
     int searchSpaceSize = 0;
+    int maxRemoved = 0;
+    string maxRemovedWord = "";
     string answer = "";
     int length = 0;
     int listSize = 0;
-    unordered_set<string> searchSpace;
-    unordered_map<string, WordInfo> words;
-    vector<Task> tasks;
 
     // Input validation
     if (argc < 3 || argc > 4) {
@@ -66,6 +64,11 @@ int main(int argc, char** argv) {
         cout << "argument num_letters must be between [4, 9] and argument 'answer' must be num_letters long" << endl;
         return -1;
     }
+
+    int maxResponseNum = pow(3, length);
+    unordered_set<string> searchSpace;
+    unordered_map<string, WordInfo> words;
+    vector<Task> tasks;
 
     //Read in from file
     ifstream wordFile;
@@ -84,18 +87,13 @@ int main(int argc, char** argv) {
         }
     }
     wordFile.close();
-    // if (id == 0) {
-    //     cout << "Answer: " << answer << endl << endl;
-    // }
-    cout << "Answer: " << answer << endl << endl;
+    if (id == 0) {
+        cout << "Answer: " << answer << endl << endl;
+    }
     
     // queue for enumerating all possible response tasks
     queue<Task> create_tasks;
     vector<Task> final_tasks;
-    int maxResponseNum = pow(3, length);
-
-    int maxRemoved = 0;
-    string maxRemovedWord = "";
 
     for (const auto &word : searchSpace) {
         maxRemoved = 0;
@@ -106,11 +104,11 @@ int main(int argc, char** argv) {
 
     int portion_size = tasks.size() / num_proc;
     int remainder = tasks.size() % num_proc;
-
+    
     int start_index = id * portion_size + (id < remainder ? id : remainder);
     int end_index = start_index + portion_size + (id < remainder);
 
-    // create tasks based off of processor id
+    // create tasks based off of processor id interval --> populate create_tasks with initial tasks
 
     for (int i = start_index; i < end_index; ++i) {
         Task currTask = tasks[i];
@@ -125,27 +123,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    // continue making tasks until responseLength == length
-
+    // tasks are local to processor only
     while (!create_tasks.empty()) {
         Task currTask = create_tasks.front();
-        string currWord = currTask.currWord;
-
         create_tasks.pop();
-
-        int responseNum = currTask.response;
-        int responseLength = currTask.responseLength;
-        if (responseLength < length) {
-            create_tasks.push({responseNum*3 + 0, responseLength+1, currWord});
-            create_tasks.push({responseNum*3 + 1, responseLength+1, currWord});
-            create_tasks.push({responseNum*3 + 2, responseLength+1, currWord});
-        } else if (responseLength == length) {
-            final_tasks.push_back(currTask);
-        }
-    }
-
-    for (int i = 0; i < final_tasks.size(); ++i) {
-        Task currTask = final_tasks[i];
         string currWord = currTask.currWord;
         WordInfo currWordInfo = words[currWord];
 
@@ -159,59 +140,65 @@ int main(int argc, char** argv) {
         int responseNum = currTask.response;
         int responseLength = currTask.responseLength;
         
-        int numWordsRemoved = 0;
-        int combo[length];
-        int responseNumCopy = responseNum;
-        for (int i = length-1; i >= 0; --i) {
-            combo[i] = responseNumCopy / pow(3, i);
-            responseNumCopy %= (int) pow(3, i);
-        }
+        if (responseLength == length) {
+            int numWordsRemoved = 0;
+            int combo[length];
+            int responseNumCopy = responseNum;
+            for (int i = length-1; i >= 0; --i) {
+                combo[i] = responseNumCopy / pow(3, i);
+                responseNumCopy %= (int) pow(3, i);
+            }
 
-        for (const auto &word : searchSpace) {
-            bool valid = true;
-            vector<bool> matched(length, false);
+            for (const auto &word : searchSpace) {
+                bool valid = true;
+                vector<bool> matched(length, false);
 
-            for (int i = 0; i < currWord.length(); ++i) {
-                int index = -1;
-                for (int j = 0; j < word.length(); ++j) {
-                    if (currWord[i] == word[j] && !matched[j]) {
-                        index = j;
-                        break;
+                for (int i = 0; i < currWord.length(); ++i) {
+                    int index = -1;
+                    for (int j = 0; j < word.length(); ++j) {
+                        if (currWord[i] == word[j] && !matched[j]) {
+                            index = j;
+                            break;
+                        }
+                    }
+                    if (combo[i] == 0) {
+                        if (index != -1) {
+                            valid = false;
+                            break;
+                        }
+                    }
+
+                    else if (combo[i] == 1) {
+                        if (index == i || index == -1) {
+                            valid = false;
+                            break;
+                        }
+                        matched[index] = true;
+                    }
+
+                    else {
+                        if (index != i) {
+                            valid = false;
+                            break;
+                        }
+                        matched[index] = true;
                     }
                 }
-                if (combo[i] == 0) {
-                    if (index != -1) {
-                        valid = false;
-                        break;
-                    }
-                }
-
-                else if (combo[i] == 1) {
-                    if (index == i || index == -1) {
-                        valid = false;
-                        break;
-                    }
-                    matched[index] = true;
-                }
-
-                else {
-                    if (index != i) {
-                        valid = false;
-                        break;
-                    }
-                    matched[index] = true;
+                if (!valid) {
+                    ++numWordsRemoved;
                 }
             }
-            if (!valid) {
-                ++numWordsRemoved;
-            }
-        }
 
-        words[currWord].searchSpaceRemoved += numWordsRemoved;
-        words[currWord].numResponsesTested += 1;
-        if (words[currWord].searchSpaceRemoved > maxRemoved) {
-            maxRemoved = words[currWord].searchSpaceRemoved;
-            maxRemovedWord = currWord;
+            words[currWord].searchSpaceRemoved += numWordsRemoved;
+            words[currWord].numResponsesTested += 1;
+            if (words[currWord].searchSpaceRemoved > maxRemoved) {
+                maxRemoved = words[currWord].searchSpaceRemoved;
+                maxRemovedWord = currWord;
+            }
+        } else {
+            create_tasks.push({responseNum*3 + 0, responseLength+1, currWord});
+            create_tasks.push({responseNum*3 + 1, responseLength+1, currWord});
+            create_tasks.push({responseNum*3 + 2, responseLength+1, currWord});
         }
     }
 
