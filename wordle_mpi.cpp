@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    int maxResponseNum = pow(3, length);
+    int maxResponseNum = 0;
     unordered_set<string> searchSpace;
     unordered_map<string, WordInfo> words;
     vector<Task> tasks;
@@ -109,7 +109,6 @@ int main(int argc, char** argv) {
     int end_index = start_index + portion_size + (id < remainder);
 
     // create tasks based off of processor id interval --> populate create_tasks with initial tasks
-
     for (int i = start_index; i < end_index; ++i) {
         Task currTask = tasks[i];
         string currWord = currTask.currWord;
@@ -195,7 +194,7 @@ int main(int argc, char** argv) {
                 maxRemoved = words[currWord].searchSpaceRemoved;
                 maxRemovedWord = currWord;
             }
-        } else {
+        } else if (responseLength < length) {
             create_tasks.push({responseNum*3 + 0, responseLength+1, currWord});
             create_tasks.push({responseNum*3 + 1, responseLength+1, currWord});
             create_tasks.push({responseNum*3 + 2, responseLength+1, currWord});
@@ -204,22 +203,30 @@ int main(int argc, char** argv) {
 
     cout << "Guess: " << maxRemovedWord << " max removed = " << maxRemoved << " pid = " << id << endl;
 
-    // int globalMaxRemoved;
-    // MPI_Allreduce(&maxRemoved, &globalMaxRemoved, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    int globalMaxRemoved;
+    MPI_Allreduce(&maxRemoved, &globalMaxRemoved, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
-    // int maxCountProcessor;
-    // int globalMaxProcessorId;
+    int maxCountProcessor;
+    int globalMaxProcessorId;
 
-    // if (maxRemoved == globalMaxRemoved) {
-    //     maxCountProcessor = id;
-    // } else {
-    //     maxCountProcessor = -1;
-    // }
+    if (maxRemoved == globalMaxRemoved) {
+        maxCountProcessor = id;
+    } else {
+        maxCountProcessor = -1;
+    }
     
-    // MPI_Allreduce(&maxCountProcessor, &globalMaxProcessorId, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-    // cout << globalMaxProcessorId << endl;
+    MPI_Allreduce(&maxCountProcessor, &globalMaxProcessorId, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
-    // MPI_Bcast(&maxCountProcessor, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    char guess_buffer[length];
+    
+    if (id == globalMaxProcessorId) {
+        std::strcpy(guess_buffer, maxRemovedWord.c_str());
+    }
+
+    MPI_Bcast(guess_buffer, length + 1, MPI_CHAR, globalMaxProcessorId, MPI_COMM_WORLD);
+    string guess(guess_buffer);
+
+    cout << "best word = " << guess << endl;
 
     // cout << maxRemovedWord << endl;
 
