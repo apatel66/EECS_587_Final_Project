@@ -36,12 +36,15 @@ struct WordInfo {
 int main(int argc, char** argv) {
     double start; 
     double end; 
-    start = omp_get_wtime(); 
+    double total_time = 0;
+    double START = omp_get_wtime();
+    double END;
 
     double maxCorrectness = 1.0;
     int maxRemoved = 0;
     string maxRemovedWord = "";
     string answer = "";
+    string lastGuess = "";
     int length = 0;
     int count = 0;
     int listSize = 0;
@@ -88,7 +91,6 @@ int main(int argc, char** argv) {
 
     int numIterations = 0;
 
-
     while (!answerFound) {
         ++numIterations;
         if (numIterations >= 7) {
@@ -113,6 +115,7 @@ int main(int argc, char** argv) {
         while (!tasks.empty()) {
             int numTasks = tasks.size();
 
+            start = omp_get_wtime();
             #pragma omp parallel for
             for (int i = 0; i < numTasks; ++i) {
                 Task currTask;
@@ -243,11 +246,17 @@ int main(int argc, char** argv) {
                 }
                 
             }
-
+            end = omp_get_wtime();
+            total_time += (end - start);
         }
 
         // Make guess + capture response
         string guess = maxRemovedWord;
+        if (guess == lastGuess) {
+            cout << "Answer was not in the file, please choose a word from the following file: words_final_" << listSize << "/" << length << "_letter_words.txt" << endl;
+            return -1;
+        }
+        lastGuess = guess;
         int comboResponse[length];
         vector<bool> matched(length, false); //Keeps track of matched letter in the answer
         for (int i = 0; i < guess.length(); ++i) {
@@ -355,8 +364,10 @@ int main(int argc, char** argv) {
         cout << "Num Words Removed: " << toRemove.size() << endl << endl;
     }
 
-    end = omp_get_wtime(); 
-    printf("Work took %f seconds\n", end - start);
+    END = omp_get_wtime(); 
+    printf("Parallel work took %f seconds\n", total_time);
+    printf("Entire Program took %f seconds\n", END-START);
+
 
     return 0;
 }
