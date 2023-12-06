@@ -1,29 +1,30 @@
 #include <bits/stdc++.h>
 #include <mpi.h>
-#include <ctime>
 #include <cmath>
+#include <ctime>
+#include <cstdlib>
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <algorithm>
+#include <vector>
 #include <unordered_set>
 #include <unordered_map>
 #include <queue>
-#include <vector>
 
 using std::unordered_set;
 using std::unordered_map;
 using std::string;
 using std::ifstream;
 using std::queue;
+using std::vector;
 using std::cout;
 using std::endl;
 using std::stoi;
-using std::vector;
 
 struct Task {
-    int response;
-    int responseLength;
+    int testWordIndex;
+    int testWordLayer;
     string currWord;
 };
 
@@ -37,18 +38,19 @@ int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
 
     // Obtain processor id and world size(number of processors)
-    int num_proc;
-    int id;
+    int NUM_PROC;
+    int ID;
 
-    MPI_Comm_size(MPI_COMM_WORLD, &num_proc);
-    MPI_Comm_rank(MPI_COMM_WORLD, &id);
+    MPI_Comm_size(MPI_COMM_WORLD, &NUM_PROC);
+    MPI_Comm_rank(MPI_COMM_WORLD, &ID);
 
     int searchSpaceSize = 0;
     int maxRemoved = 0;
-    string maxRemovedWord = "";
+    string maxRemovedWord = "ZZZZZ";
     string answer = "";
     int length = 0;
     int listSize = 0;
+    bool answerFound = false;
 
     // Input validation
     if (argc < 3 || argc > 4) {
@@ -65,10 +67,17 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    int maxResponseNum = pow(3, length);
-    unordered_set<string> searchSpace;
+
+    // 1. All processes read in from the file
+    // 2. Each process calculates its partition
+    // 3. Each process finds its local max
+    // 4. All_reduce to find max removed
+    // 5. The process with the word should print it out and send to others
+    // 6. Every process will update its search space
+    // 7. Repeat until no work is left
+
+    vector<string> searchSpace;
     unordered_map<string, WordInfo> words;
-    vector<Task> tasks;
 
     //Read in from file
     ifstream wordFile;
@@ -79,255 +88,271 @@ int main(int argc, char** argv) {
     int inc = 0;
     while (!wordFile.eof()) {
         wordFile >> nextWord;
-        searchSpace.insert(nextWord);
-        ++searchSpaceSize;
+        searchSpace.push_back(nextWord);
         ++inc;
         if (answer == "" && inc == randWord) {
             answer = nextWord; //Change from last word in the list to a random one
         }
     }
+    searchSpace.pop_back();
     wordFile.close();
-    if (id == 0) {
+    if (ID == 0) {
         cout << "Answer: " << answer << endl << endl;
-        cout << "Search Space Size = " << searchSpaceSize << endl;
-    }
-    
-    // queue for enumerating all possible response tasks
-    queue<Task> create_tasks;
-    vector<Task> final_tasks;
-
-    for (const auto &word : searchSpace) {
-        maxRemoved = 0;
-        maxRemovedWord = "";
-        words[word] = {0, 0};
-        tasks.push_back({0, 0, word});
     }
 
-    int portion_size = tasks.size() / num_proc;
-    int remainder = tasks.size() % num_proc;
-    
-    int start_index = id * portion_size + (id < remainder ? id : remainder);
-    int end_index = start_index + portion_size + (id < remainder);
-
-    // create tasks based off of processor id interval --> populate create_tasks with initial tasks
-    for (int i = start_index; i < end_index; ++i) {
-        Task currTask = tasks[i];
-        string currWord = currTask.currWord;
-
-        int responseNum = currTask.response;
-        int responseLength = currTask.responseLength;
-        if (responseLength < length) {
-            create_tasks.push({responseNum*3 + 0, responseLength+1, currWord});
-            create_tasks.push({responseNum*3 + 1, responseLength+1, currWord});
-            create_tasks.push({responseNum*3 + 2, responseLength+1, currWord});
-        }
-    }
-
-    // tasks are local to processor only
-    while (!create_tasks.empty()) {
-        Task currTask = create_tasks.front();
-        create_tasks.pop();
-        string currWord = currTask.currWord;
-        WordInfo currWordInfo = words[currWord];
-
-        int numResponsesLeft = maxResponseNum - currWordInfo.numResponsesTested;
-        int theoreticalMax = currWordInfo.searchSpaceRemoved + numResponsesLeft * searchSpaceSize;
-
-        if (theoreticalMax < maxRemoved) {
-            continue;
-        }
-
-        int responseNum = currTask.response;
-        int responseLength = currTask.responseLength;
+    //while (answerFound) {
+        int portion_size = searchSpace.size() / NUM_PROC;
+        int remainder = searchSpace.size() % NUM_PROC;
         
-        if (responseLength == length) {
-            // if (id == 0) {
-            //     cout << "word = " << currWord << "theoretical max = " << theoreticalMax << " maxRemoved = " << maxRemoved << endl;
-            // }
-            int numWordsRemoved = 0;
-            int combo[length];
-            int responseNumCopy = responseNum;
-            for (int i = length-1; i >= 0; --i) {
-                combo[i] = responseNumCopy / pow(3, i);
-                responseNumCopy %= (int) pow(3, i);
-            }
+        int start_index = ID * portion_size + (ID < remainder ? ID : remainder);
+        int end_index = start_index + portion_size + (ID < remainder);
+        int numWords = end_index - start_index + 1;
 
-            for (const auto &word : searchSpace) {
-                bool valid = true;
-                vector<bool> matched(length, false);
+        maxRemoved = 0;
+        maxRemovedWord = "ZZZZ";
 
-                for (int i = 0; i < currWord.length(); ++i) {
+        // Create an empty map of words
+        for (int i = start_index; i < end_index; ++i) {
+            words[searchSpace[i]] = {0, 0};
+        }
+
+        // Go through all words in the parition
+        for (int i = start_index; i < end_index; ++i) {
+            string currWord = searchSpace[i];
+            for (int j = 0; j < searchSpace.size(); ++j) {
+                string testWord = searchSpace[j];
+                int numRemoved = 0;
+
+                //Get the response for the currWord (answer) + testWord (guess) combo
+                int combo[length];
+                vector<bool> matched(length, false); //Keeps track of matched letter in the answer
+                for (int i = 0; i < testWord.length(); ++i) {
                     int index = -1;
-                    for (int j = 0; j < word.length(); ++j) {
-                        if (currWord[i] == word[j] && !matched[j]) {
+                    for (int j = 0; j < currWord.length(); ++j) {
+                        if (testWord[i] == currWord[j] && !matched[j]) {
                             index = j;
                             break;
                         }
                     }
-                    if (combo[i] == 0) {
-                        if (index != -1) {
-                            valid = false;
-                            break;
-                        }
-                    }
 
-                    else if (combo[i] == 1) {
-                        if (index == i || index == -1) {
-                            valid = false;
-                            break;
-                        }
+                    if (index == -1) {
+                        combo[i] = 0;
+                    }
+                    else if (index != i) {
+                        combo[i] = 1;
                         matched[index] = true;
                     }
-
                     else {
-                        if (index != i) {
-                            valid = false;
-                            break;
-                        }
+                        combo[i] = 2;
                         matched[index] = true;
                     }
                 }
-                if (!valid) {
-                    ++numWordsRemoved;
+
+                //Go through each word in the search space and count how many would be invalid had we guessed the testWord
+                for (const auto &word : searchSpace) {
+                    bool valid = true;
+
+                    // Check if a word meets the response
+                    vector <bool> matched(length, false);
+                    for (int i = 0; i < testWord.length(); ++i) {
+                        int index = -1;
+                        for (int j = 0; j < word.length(); ++j) {
+                            if (testWord[i] == word[j] && !matched[j]) {
+                                index = j;
+                                break;
+                            }
+                        }
+
+                        if (combo[i] == 0) { // Grey
+                            if (index != -1) {
+                                valid  = false;
+                                break;
+                            }
+                        }
+                        else if (combo[i] == 1) { // Yellow
+                            if (index == i || index == -1) {
+                                valid  = false;
+                                break;
+                            }
+                            matched[index] = true;
+                        }
+                        else { // Green
+                            if (index != i) {
+                                valid = false;
+                                break;
+                            }
+                            matched[index] = true;
+                        }
+                    }
+
+                    if (!valid) {
+                        ++numRemoved;
+                    }
                 }
+
+                // Update the number of words removed
+                words[currWord].searchSpaceRemoved += numRemoved;
+                words[currWord].numResponsesTested += 1;
             }
 
-            words[currWord].searchSpaceRemoved += numWordsRemoved;
-            words[currWord].numResponsesTested += 1;
-            if (words[currWord].searchSpaceRemoved > maxRemoved) {
+            // Update the optimal word if there's a new max
+            if (words[currWord].searchSpaceRemoved > maxRemoved ||
+                (words[currWord].searchSpaceRemoved == maxRemoved && currWord.compare(maxRemovedWord) < 0)) {
                 maxRemoved = words[currWord].searchSpaceRemoved;
                 maxRemovedWord = currWord;
             }
-        } if (responseLength < length) {
-            create_tasks.push({responseNum*3 + 0, responseLength+1, currWord});
-            create_tasks.push({responseNum*3 + 1, responseLength+1, currWord});
-            create_tasks.push({responseNum*3 + 2, responseLength+1, currWord});
-        }
-    }
-
-    cout << "Guess: " << maxRemovedWord << " max removed = " << maxRemoved << " pid = " << id << endl;
-
-    int globalMaxRemoved;
-    MPI_Allreduce(&maxRemoved, &globalMaxRemoved, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-
-    int maxCountProcessor;
-    int globalMaxProcessorId;
-
-    if (maxRemoved == globalMaxRemoved) {
-        maxCountProcessor = id;
-    } else {
-        maxCountProcessor = -1;
-    }
-    
-    MPI_Allreduce(&maxCountProcessor, &globalMaxProcessorId, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-
-    char guess_buffer[length];
-    
-    if (id == globalMaxProcessorId) {
-        std::strcpy(guess_buffer, maxRemovedWord.c_str());
-    }
-
-    MPI_Bcast(guess_buffer, length + 1, MPI_CHAR, globalMaxProcessorId, MPI_COMM_WORLD);
-    string guess(guess_buffer);
-
-    cout << "best word = " << guess << endl;
-
-    int comboResponse[length];
-    vector<bool> matched(length, false);
-    for (int i = 0; i < guess.length(); ++i) {
-        int index = -1;
-        for (int j = 0; j < answer.length(); ++j) {
-            if (guess[i] == answer[j] && !matched[j]) {
-                index = i;
-                break;
-            }
         }
 
-        if (index == -1) {
-            comboResponse[i] = 0;
-        }
-        else if (index != i) {
-            comboResponse[i] = 1;
-            matched[index] = true;
-        }
-        else {
-            comboResponse[i] == 2;
-            matched[index] = true;
-        }
-    }
+        //We have our local max now
 
-    if (id == 0) {
-        cout << "Guess: " << guess << "   Response: ";
-        for (int i = 0; i < length; ++i) {
-            if (comboResponse[i] == 0) {
-                cout << "B";
-            }
-            else if (comboResponse[i] == 1) {
-                cout << "Y";
-            }
-            else {
-                cout << "G";
-            }
+        //Communicate to find the global best word 
+        cout << "Guess: " << maxRemovedWord << " max removed = " << maxRemoved << " pid = " << ID << endl;
+        int globalMaxRemoved;
+        MPI_Allreduce(&maxRemoved, &globalMaxRemoved, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+
+        int maxCountProcessor;
+        int globalMaxProcessorId;
+        if (maxRemoved == globalMaxRemoved) {
+            maxCountProcessor = ID;
+        } else {
+            maxCountProcessor = -1;
         }
-        cout << endl;
-    }
+        MPI_Allreduce(&maxCountProcessor, &globalMaxProcessorId, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 
-    int numRemoved = 0;
-    vector<string> toRemove;
+        char guess_buffer[length];
+        if (ID == globalMaxProcessorId) {
+            std::strcpy(guess_buffer, maxRemovedWord.c_str());
+        }
+        MPI_Bcast(guess_buffer, length + 1, MPI_CHAR, globalMaxProcessorId, MPI_COMM_WORLD);
+        string guess(guess_buffer);
 
-    for (const auto &word : searchSpace) {
-        bool valid = true;
+        cout << "best word = " << guess << endl;
 
-        vector <bool> matched(length, false);
+        //Check the guess and get the response
+        int comboResponse[length];
+        vector<bool> matched(length, false); //Keeps track of matched letter in the answer
         for (int i = 0; i < guess.length(); ++i) {
             int index = -1;
-            for (int j = 0; j < word.length(); ++j) {
-                if (guess[i] == word[j] && !matched[i]) {
+            for (int j = 0; j < answer.length(); ++j) {
+                if (guess[i] == answer[j] && !matched[j]) {
                     index = j;
                     break;
                 }
             }
 
-            if (comboResponse[i] == 0) {
-                if (index != -1) {
-                    valid = false;
-                    break;
-                }
+            if (index == -1) {
+                comboResponse[i] = 0;
             }
-            else if (comboResponse[i] == 1) {
-                if (index == i || index == -1) {
-                    valid = false;
-                    break;
-                }
+            else if (index != i) {
+                comboResponse[i] = 1;
                 matched[index] = true;
             }
             else {
-                if (index != i) {
-                    valid = false;
-                    break;
-                }
+                comboResponse[i] = 2;
                 matched[index] = true;
             }
         }
 
-        if (!valid) {
-            toRemove.push_back(word);
+        if (ID == 0) {
+            cout << "Guess: " << guess << "   Response: ";
+            for (int i = 0; i < length; ++i) {
+                if (comboResponse[i] == 0) {
+                    cout << "B";
+                }
+                else if (comboResponse[i] == 1) {
+                    cout << "Y";
+                }
+                else {
+                    cout << "G";
+                }
+            }
+            cout << endl;
         }
-    }
-
-    toRemove.push_back(guess);
-
-    //Remove words that don't work
-    for (string word : toRemove) {
-        if (searchSpace.find(word) != searchSpace.end()) {
-            //cout << word << endl;
-            searchSpace.erase(word);
-            --searchSpaceSize;
-            ++numRemoved;  
+    
+        // Check if it's the answer
+        bool isAnswer = true;
+        for (int i = 0; i < length; ++i) {
+            if (comboResponse[i] != 2) {
+                isAnswer = false;
+                break;
+            }
         }
-    }
+        if (isAnswer) {
+            answerFound = true;
+        }
 
-    cout << "Optimal Word: " << guess << " Num Words Removed: " << numRemoved << endl << endl;
+        // Update search space
+        //Go through each word in the searchSpace
+        int numRemoved = 0;
+        unordered_set <string> toRemove;
+        for (const auto &word : searchSpace) {
+            bool valid = true;
+            
+            // Check if a word meets the response
+            vector <bool> matched(length, false);
+            for (int i = 0; i < guess.length(); ++i) {
+                int index = -1;
+                for (int j = 0; j < word.length(); ++j) {
+                    if (guess[i] == word[j] && !matched[j]) {
+                        index = j;
+                        break;
+                    }
+                }
+
+                if (comboResponse[i] == 0) {
+                    if (index != -1) {
+                        valid  = false;
+                        break;
+                    }
+                }
+                else if (comboResponse[i] == 1) {
+                    if (index == i || index == -1) {
+                        valid  = false;
+                        break;
+                    }
+                    matched[index] = true;
+                }
+                else {
+                    if (index != i) {
+                        valid = false;
+                        break;
+                    }
+                    matched[index] = true;
+                }
+            }
+
+            if (!valid) {
+                toRemove.insert(word);
+            }
+        }
+        toRemove.insert(guess);
+
+        //Remove words that don't work
+        vector<string> newSearchSpace;
+        for (string word : searchSpace) {
+            if (toRemove.find(word) == toRemove.end()) {
+                newSearchSpace.push_back(word);
+            }
+        }
+        searchSpace = newSearchSpace;
+        if (ID == 0){
+            cout << "Response: ";
+            for (int i = 0; i < length; ++i) {
+                if (comboResponse[i] == 0) {
+                    cout << "B";
+                }
+                else if (comboResponse[i] == 1) {
+                    cout << "Y";
+                }
+                else {
+                    cout << "G";
+                }
+            }
+            cout << endl;
+            cout << "Num Words Removed: " << toRemove.size() << endl << endl;
+        }
+
+    //}
 
     //Finalize MPI
     MPI_Finalize();
