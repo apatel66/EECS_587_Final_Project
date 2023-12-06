@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &ID);
 
     //Timer
-    MPI_Barrier(MPI_COMM_WORLD);
+    //MPI_Barrier(MPI_COMM_WORLD);
     double startTime, endTime;
     double startPartTime, endPartTime, totalTime;
     if (ID == 0) {
@@ -116,7 +116,7 @@ int main(int argc, char** argv) {
             words[searchSpace[i]] = {0, 0};
         }
 
-        MPI_Barrier(MPI_COMM_WORLD);
+        //MPI_Barrier(MPI_COMM_WORLD);
         if (ID == 0) {
             startPartTime = MPI_Wtime();
         }
@@ -218,7 +218,7 @@ int main(int argc, char** argv) {
         //We have our local max now
 
         //Communicate to find the global best word 
-        MPI_Barrier(MPI_COMM_WORLD);
+        //MPI_Barrier(MPI_COMM_WORLD);
         //cout << "Guess: " << maxRemovedWord << " max removed = " << maxRemoved << " pid = " << ID << endl;
         int globalMaxRemoved;
         MPI_Allreduce(&maxRemoved, &globalMaxRemoved, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
@@ -361,7 +361,7 @@ int main(int argc, char** argv) {
 
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
+    //MPI_Barrier(MPI_COMM_WORLD);
     if (ID == 0) {
         endTime = MPI_Wtime();
         cout << "Parallel work took " << totalTime << " seconds" << endl;
